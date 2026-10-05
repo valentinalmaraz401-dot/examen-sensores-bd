@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+venv/
+.venv/
+__pycache__/
+*.pyc
+data/alertas.csv
+.DS_Store
