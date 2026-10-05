@@ -319,10 +319,10 @@ Además, el proyecto utiliza Git y GitHub para el control de versiones, la organ
 
 Con este ejercicio se aplican conocimientos de lectura, procesamiento, filtrado y exportación de datos, así como herramientas fundamentales para el desarrollo de proyectos de análisis de información.
 
-## 20. Autor
+## 20. Autores
 
-**Valentín Almaraz**
+**Valentín Almaraz Martinez y Alberto Saul Lopez Crespo**
 
-Proyecto académico de la materia **Manejo Masivo de Datos**.
+ **Manejo Masivo de Datos**.
 
 Repositorio: https://github.com/valentinalmaraz401-dot/examen-sensores-bd
