@@ -35,5 +35,19 @@ def ejecutar_analisis():
     for idx, row in max_temp_rows.iterrows():
         print(f"   - Sensor: {row['id_sensor']} | Fecha: {row['fecha_hora']} | Planta: {row['planta']}")
 
+    # 4. Lecturas con temperatura mayor que 85 °C (1 pto)
+    df_alertas = df[df["temperatura_c"] > 85]
+    total_alertas = len(df_alertas)
+    print(f"\n4. Cantidad de lecturas con alerta (> 85 °C): {total_alertas}")
+
+    # 5. Planta con más alertas de temperatura (1 pto - incluye empates)
+    print("\n5. Planta(s) con mayor cantidad de alertas:")
+    alertas_por_planta = df_alertas["planta"].value_counts()
+    if not alertas_por_planta.empty:
+        max_alertas_count = alertas_por_planta.max()
+        plantas_top = alertas_por_planta[alertas_por_planta == max_alertas_count]
+        for planta, count in plantas_top.items():
+            print(f"   - {planta}: {count} alertas")
+
 if __name__ == "__main__":
     ejecutar_analisis()
