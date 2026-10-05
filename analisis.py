@@ -28,5 +28,12 @@ def ejecutar_analisis():
     for planta, promedio in temp_promedio.items():
         print(f"   - {planta}: {promedio:.2f} °C")
 
+    # 3. Temperatura máxima, sensor(es) y fecha(s) correspondientes (1 pto - incluye empates)
+    max_temp_val = df["temperatura_c"].max()
+    max_temp_rows = df[df["temperatura_c"] == max_temp_val]
+    print(f"\n3. Temperatura máxima registrada: {max_temp_val} °C")
+    for idx, row in max_temp_rows.iterrows():
+        print(f"   - Sensor: {row['id_sensor']} | Fecha: {row['fecha_hora']} | Planta: {row['planta']}")
+
 if __name__ == "__main__":
     ejecutar_analisis()
