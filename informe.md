@@ -131,3 +131,126 @@ Por ejemplo, un sensor podría enviar información con una estructura similar a:
   "vibracion_mm_s": 4.2
 }
 
+## 7. Batch y Streaming
+
+### Tipo de procesamiento que realizamos
+Nuestro programa `analisis.py` realiza **procesamiento por lotes (batch)**.
+
+**Justificación:** lee un conjunto finito de datos que ya estaba guardado (`data/sensores_industriales.csv`, 100,000 registros), lo procesa completo de principio a fin en una sola ejecución y entrega los resultados al terminar. No reacciona a lecturas nuevas conforme llegan: si el archivo cambia, hay que volver a ejecutar el programa. Como es un análisis posterior a la recolección, no se necesita una respuesta inmediata.
+
+### Alerta pocos segundos después de una lectura mayor que 85 °C
+Usaríamos **streaming** (procesamiento de cada evento conforme llega).
+
+**Justificación:** aquí el valor del resultado depende de la *latencia*. Una alerta que llega al día siguiente ya no sirve para actuar sobre la máquina. Con streaming, cada lectura se evalúa al llegar (`temperatura_c > 85`) y, si cumple la regla, se envía una notificación en segundos. Podría implementarse con una cola de mensajes (por ejemplo, Apache Kafka) y un motor de procesamiento de flujos (por ejemplo, Apache Flink o Spark Structured Streaming). Con la ampliación a miles de sensores enviando datos cada segundo, un programa que vuelve a leer un archivo completo ya no sería viable.
+
+Detalle de diseño: para evitar falsas alarmas por una lectura aislada, se podría exigir que la regla se cumpla en varias lecturas consecutivas del mismo sensor. Esto aumentaría un poco la latencia, pero mejoraría la veracidad de la alerta.
+
+### Resumen al terminar el día
+Usaríamos **batch**, programado una vez al día (por ejemplo, un proceso automático a medianoche).
+
+**Justificación:** un resumen diario (promedio por planta, máximos, número de alertas) necesita *todas* las lecturas del día y no se consulta minuto a minuto. Esperar a que el día cierre permite procesar el conjunto completo en una sola ejecución, con menor costo de cómputo y con un resultado completo y consistente.
+
+### Relación con el tiempo en que se necesita cada resultado
+
+| Necesidad | Tiempo en que se requiere el resultado | Enfoque |
+|---|---|---|
+| Alerta por temperatura > 85 °C | Segundos | Streaming |
+| Resumen del día | Horas (al cierre del día) | Batch |
+| Análisis del examen sobre el CSV | Sin urgencia (análisis posterior) | Batch |
+
+La decisión depende de cuánto vale la información con el paso del tiempo: lo que pide acción inmediata se procesa por flujo, y lo que se consulta después se procesa por lotes.
+
+---
+
+## 8. Arquitecturas Lambda y Kappa
+
+### Escenario A: ruta por lotes para recalcular el historial + ruta rápida para lo reciente
+**Arquitectura elegida: Lambda.**
+
+**Justificación:** Lambda mantiene dos rutas en paralelo, que es justo lo que describe el escenario. La **capa de lotes** recalcula el historial completo con precisión, y la **capa de velocidad** procesa las mediciones recientes con baja latencia. Una **capa de servicio** combina ambos resultados para consultarlos. Su ventaja es que ofrece resultados rápidos de lo reciente y resultados completos después. Su desventaja es que obliga a mantener dos lógicas de procesamiento distintas.
+
+```
+          [ Sensores / Fuentes de datos ]
+                       │
+            ┌──────────┴───────────┐
+            ▼                      ▼
+   ┌─────────────────┐    ┌─────────────────┐
+   │  CAPA DE LOTES  │    │CAPA DE VELOCIDAD│
+   │ Recalcula todo  │    │ Procesa lo      │
+   │ el historial    │    │ reciente rápido │
+   └────────┬────────┘    └────────┬────────┘
+            │                      │
+            └──────────┬───────────┘
+                       ▼
+          ┌─────────────────────────┐
+          │    CAPA DE SERVICIO     │
+          │ Une ambos resultados    │
+          │ para consulta           │
+          └─────────────────────────┘
+```
+
+### Escenario B: una sola lógica de procesamiento + conservar las mediciones para reprocesar
+**Arquitectura elegida: Kappa.**
+
+**Justificación:** Kappa elimina la ruta por lotes y procesa todo como flujo de eventos con una única lógica. Los eventos se conservan en un **registro inmutable** (log), por ejemplo Kafka. Si cambia una regla (por ejemplo, el umbral de alerta) o se detecta un error, se vuelve a leer el registro desde el inicio con el mismo código. Es más simple de mantener que Lambda porque solo hay una lógica que cuidar.
+
+```
+          [ Sensores / Fuentes de datos ]
+                       │
+                       ▼
+       ┌───────────────────────────────┐
+       │ REGISTRO INMUTABLE DE EVENTOS │
+       │ (conserva todo el historial)  │
+       └───────────────┬───────────────┘
+                       ▼
+       ┌───────────────────────────────┐
+       │    PROCESAMIENTO DE FLUJO     │
+       │       (una sola lógica)       │
+       └───────────────┬───────────────┘
+                       ▼
+       ┌───────────────────────────────┐
+       │       CAPA DE SERVICIO        │
+       │      (vistas de salida)       │
+       └───────────────────────────────┘
+```
+
+Para reprocesar, se vuelve a leer el registro inmutable desde el inicio con la misma lógica de flujo, sin crear una ruta aparte.
+
+---
+
+## 9. Analítica descriptiva, predictiva y prescriptiva
+
+### Descriptiva (hallazgos reales de nuestro análisis)
+1. **Alertas por planta:** se registraron **6,954 lecturas** con temperatura mayor que 85 °C, de un total de 100,000 (6.95 %). La planta con más alertas fue **Planta_3**, con **1,777 alertas** (25.55 % del total de alertas).
+2. **Temperatura máxima:** el valor más alto fue **104.99 °C** y hubo **empate entre 4 lecturas**:
+   - sensor S023, Planta_3, 01/09/26 22:23
+   - sensor S019, Planta_2, 02/09/26 13:11
+   - sensor S014, Planta_2, 02/09/26 15:23
+   - sensor S030, Planta_3, 02/09/26 16:02
+
+   (Las fechas se muestran tal como las imprime el programa.)
+
+**Observación sobre los datos:** las temperaturas promedio por planta son casi iguales (Planta_1 = 66.62 °C, Planta_2 = 66.53 °C, Planta_3 = 66.77 °C, Planta_4 = 66.67 °C). Además, el 25.55 % de alertas de Planta_3 está muy cerca del 25 % que se esperaría si las alertas se repartieran por igual entre las 4 plantas. Por eso la diferencia entre plantas es pequeña y no basta para concluir que Planta_3 sea más riesgosa.
+
+### Predictiva
+**Pregunta:** ¿Qué máquinas tienen mayor probabilidad de presentar una falla en las próximas 48 horas si su temperatura y su vibración aumentan de forma sostenida?
+
+**Datos adicionales necesarios** (el CSV actual no los contiene):
+1. Historial de fallas y mantenimientos (fechas y tipo de falla), para saber qué lecturas anteceden a una falla real.
+2. Identificación de la máquina asociada a cada sensor, con su modelo, edad y especificaciones del fabricante. El CSV solo identifica sensores y plantas.
+3. Condiciones de operación: carga de trabajo, horas de uso y temperatura ambiente.
+4. Series de tiempo más largas, para detectar tendencias y no solo lecturas sueltas.
+
+Sin el punto 1 no se puede entrenar ni validar un modelo. Una lectura por encima de 85 °C es una alerta del ejercicio, pero por sí sola no demuestra que una máquina vaya a fallar.
+
+### Prescriptiva
+**Riesgo previsto:** que los sensores con las lecturas máximas (S023, S019, S014 y S030, todos con 104.99 °C) y la Planta_3, que concentra más alertas, sigan mostrando temperaturas altas de forma repetida.
+
+**Acción propuesta:** programar una inspección técnica de los equipos asociados a esos cuatro sensores antes del siguiente turno de producción. Se priorizarían S023 y S030, porque pertenecen a Planta_3, que además es la planta con más alertas.
+
+**Información que revisaríamos antes de decidir:**
+1. Si las lecturas altas son picos aislados o una tendencia sostenida, por ejemplo contando las alertas por sensor, porque una sola lectura máxima no indica un patrón.
+2. Si la vibración también aumenta en esos mismos momentos. Nuestro análisis no la incluyó.
+3. Si los sensores funcionan bien o están descalibrados, comparándolos con otros sensores de la misma planta.
+4. El historial de mantenimiento de las máquinas y la fecha de su última revisión.
+5. El costo de detener la producción frente al costo de una posible falla, y la disponibilidad de técnicos y refacciones.
