@@ -130,3 +130,4 @@ Por ejemplo, un sensor podría enviar información con una estructura similar a:
   "temperatura_c": 87.4,
   "vibracion_mm_s": 4.2
 }
+
