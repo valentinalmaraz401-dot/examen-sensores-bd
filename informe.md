@@ -130,127 +130,152 @@ Por ejemplo, un sensor podría enviar información con una estructura similar a:
   "temperatura_c": 87.4,
   "vibracion_mm_s": 4.2
 }
+```
+Aunque los datos están organizados mediante claves y valores, no tienen necesariamente la estructura de una tabla CSV.
 
-## 7. Batch y Streaming
+### Fotografía
 
-### Tipo de procesamiento que realizamos
-Nuestro programa `analisis.py` realiza **procesamiento por lotes (batch)**.
+Una fotografía de una máquina es un dato no estructurado porque contiene información visual.
 
-**Justificación:** lee un conjunto finito de datos que ya estaba guardado (`data/sensores_industriales.csv`, 100,000 registros), lo procesa completo de principio a fin en una sola ejecución y entrega los resultados al terminar. No reacciona a lecturas nuevas conforme llegan: si el archivo cambia, hay que volver a ejecutar el programa. Como es un análisis posterior a la recolección, no se necesita una respuesta inmediata.
+Por ejemplo, una cámara podría tomar fotografías de una máquina para posteriormente utilizar técnicas de procesamiento de imágenes para identificar daños, desgaste o alguna condición anormal.
 
-### Alerta pocos segundos después de una lectura mayor que 85 °C
-Usaríamos **streaming** (procesamiento de cada evento conforme llega).
+### Texto de mantenimiento
 
-**Justificación:** aquí el valor del resultado depende de la *latencia*. Una alerta que llega al día siguiente ya no sirve para actuar sobre la máquina. Con streaming, cada lectura se evalúa al llegar (`temperatura_c > 85`) y, si cumple la regla, se envía una notificación en segundos. Podría implementarse con una cola de mensajes (por ejemplo, Apache Kafka) y un motor de procesamiento de flujos (por ejemplo, Apache Flink o Spark Structured Streaming). Con la ampliación a miles de sensores enviando datos cada segundo, un programa que vuelve a leer un archivo completo ya no sería viable.
+Un reporte de mantenimiento escrito por un técnico también puede considerarse un dato no estructurado.
 
-Detalle de diseño: para evitar falsas alarmas por una lectura aislada, se podría exigir que la regla se cumpla en varias lecturas consecutivas del mismo sensor. Esto aumentaría un poco la latencia, pero mejoraría la veracidad de la alerta.
+Por ejemplo:
 
-### Resumen al terminar el día
-Usaríamos **batch**, programado una vez al día (por ejemplo, un proceso automático a medianoche).
+> *"Durante la revisión se detectó un aumento de temperatura y ruido inusual en el motor."*
 
-**Justificación:** un resumen diario (promedio por planta, máximos, número de alertas) necesita *todas* las lecturas del día y no se consulta minuto a minuto. Esperar a que el día cierre permite procesar el conjunto completo en una sola ejecución, con menor costo de cómputo y con un resultado completo y consistente.
-
-### Relación con el tiempo en que se necesita cada resultado
-
-| Necesidad | Tiempo en que se requiere el resultado | Enfoque |
-|---|---|---|
-| Alerta por temperatura > 85 °C | Segundos | Streaming |
-| Resumen del día | Horas (al cierre del día) | Batch |
-| Análisis del examen sobre el CSV | Sin urgencia (análisis posterior) | Batch |
-
-La decisión depende de cuánto vale la información con el paso del tiempo: lo que pide acción inmediata se procesa por flujo, y lo que se consulta después se procesa por lotes.
+Este tipo de información podría analizarse posteriormente mediante técnicas de procesamiento de lenguaje natural.
 
 ---
 
-## 8. Arquitecturas Lambda y Kappa
+## ¿Por qué 100,000 registros no son automáticamente Big Data?
 
-### Escenario A: ruta por lotes para recalcular el historial + ruta rápida para lo reciente
-**Arquitectura elegida: Lambda.**
+Tener 100,000 registros no significa automáticamente que un conjunto de datos sea Big Data.
 
-**Justificación:** Lambda mantiene dos rutas en paralelo, que es justo lo que describe el escenario. La **capa de lotes** recalcula el historial completo con precisión, y la **capa de velocidad** procesa las mediciones recientes con baja latencia. Una **capa de servicio** combina ambos resultados para consultarlos. Su ventaja es que ofrece resultados rápidos de lo reciente y resultados completos después. Su desventaja es que obliga a mantener dos lógicas de procesamiento distintas.
+El concepto de Big Data no depende únicamente de la cantidad de registros. También se consideran características como el volumen, la velocidad, la variedad, la veracidad y el valor de los datos.
 
-```
-          [ Sensores / Fuentes de datos ]
-                       │
-            ┌──────────┴───────────┐
-            ▼                      ▼
-   ┌─────────────────┐    ┌─────────────────┐
-   │  CAPA DE LOTES  │    │CAPA DE VELOCIDAD│
-   │ Recalcula todo  │    │ Procesa lo      │
-   │ el historial    │    │ reciente rápido │
-   └────────┬────────┘    └────────┬────────┘
-            │                      │
-            └──────────┬───────────┘
-                       ▼
-          ┌─────────────────────────┐
-          │    CAPA DE SERVICIO     │
-          │ Une ambos resultados    │
-          │ para consulta           │
-          └─────────────────────────┘
-```
+Un archivo de 100,000 registros puede ser procesado fácilmente en una computadora convencional utilizando Python y Pandas[cite: 5]. Sin embargo, si el sistema comienza a recibir millones de registros continuamente desde miles de sensores, la situación puede requerir tecnologías especializadas para almacenamiento y procesamiento distribuido.
 
-### Escenario B: una sola lógica de procesamiento + conservar las mediciones para reprocesar
-**Arquitectura elegida: Kappa.**
-
-**Justificación:** Kappa elimina la ruta por lotes y procesa todo como flujo de eventos con una única lógica. Los eventos se conservan en un **registro inmutable** (log), por ejemplo Kafka. Si cambia una regla (por ejemplo, el umbral de alerta) o se detecta un error, se vuelve a leer el registro desde el inicio con el mismo código. Es más simple de mantener que Lambda porque solo hay una lógica que cuidar.
-
-```
-          [ Sensores / Fuentes de datos ]
-                       │
-                       ▼
-       ┌───────────────────────────────┐
-       │ REGISTRO INMUTABLE DE EVENTOS │
-       │ (conserva todo el historial)  │
-       └───────────────┬───────────────┘
-                       ▼
-       ┌───────────────────────────────┐
-       │    PROCESAMIENTO DE FLUJO     │
-       │       (una sola lógica)       │
-       └───────────────┬───────────────┘
-                       ▼
-       ┌───────────────────────────────┐
-       │       CAPA DE SERVICIO        │
-       │      (vistas de salida)       │
-       └───────────────────────────────┘
-```
-
-Para reprocesar, se vuelve a leer el registro inmutable desde el inicio con la misma lógica de flujo, sin crear una ruta aparte.
+Por lo tanto, en este proyecto los 100,000 registros representan un ejercicio de manejo masivo de datos, pero no se debe afirmar que la cantidad por sí sola convierte al archivo en Big Data.
 
 ---
 
-## 9. Analítica descriptiva, predictiva y prescriptiva
+## Limitaciones al aumentar la escala
 
-### Descriptiva (hallazgos reales de nuestro análisis)
-1. **Alertas por planta:** se registraron **6,954 lecturas** con temperatura mayor que 85 °C, de un total de 100,000 (6.95 %). La planta con más alertas fue **Planta_3**, con **1,777 alertas** (25.55 % del total de alertas).
-2. **Temperatura máxima:** el valor más alto fue **104.99 °C** y hubo **empate entre 4 lecturas**:
-   - sensor S023, Planta_3, 01/09/26 22:23
-   - sensor S019, Planta_2, 02/09/26 13:11
-   - sensor S014, Planta_2, 02/09/26 15:23
-   - sensor S030, Planta_3, 02/09/26 16:02
+Si la cantidad de datos aumenta considerablemente, pueden aparecer diferentes limitaciones:
 
-   (Las fechas se muestran tal como las imprime el programa.)
+* **Consumo de recursos:** Mayor consumo de memoria RAM.
+* **Capacidad:** Mayor espacio necesario para almacenamiento.
+* **Rendimiento:** Mayor tiempo de procesamiento.
+* **Infraestructura:** Dificultades para procesar los datos en una sola computadora.
+* **Escalabilidad:** Necesidad de procesamiento distribuido.
+* **Ingesta:** Necesidad de sistemas capaces de recibir datos en tiempo real.
+* **Consultas:** Mayor complejidad para almacenar y consultar grandes cantidades de información.
+* **Gobernanza:** Necesidad de mecanismos para controlar la calidad y confiabilidad de los datos.
 
-**Observación sobre los datos:** las temperaturas promedio por planta son casi iguales (Planta_1 = 66.62 °C, Planta_2 = 66.53 °C, Planta_3 = 66.77 °C, Planta_4 = 66.67 °C). Además, el 25.55 % de alertas de Planta_3 está muy cerca del 25 % que se esperaría si las alertas se repartieran por igual entre las 4 plantas. Por eso la diferencia entre plantas es pequeña y no basta para concluir que Planta_3 sea más riesgosa.
+# 7. Batch y Streaming
 
-### Predictiva
-**Pregunta:** ¿Qué máquinas tienen mayor probabilidad de presentar una falla en las próximas 48 horas si su temperatura y su vibración aumentan de forma sostenida?
+## Procesamiento actual
 
-**Datos adicionales necesarios** (el CSV actual no los contiene):
-1. Historial de fallas y mantenimientos (fechas y tipo de falla), para saber qué lecturas anteceden a una falla real.
-2. Identificación de la máquina asociada a cada sensor, con su modelo, edad y especificaciones del fabricante. El CSV solo identifica sensores y plantas.
-3. Condiciones de operación: carga de trabajo, horas de uso y temperatura ambiente.
-4. Series de tiempo más largas, para detectar tendencias y no solo lecturas sueltas.
+El programa actual utiliza un procesamiento de tipo **Batch**, debido a que trabaja con un archivo CSV que contiene los datos previamente almacenados.
 
-Sin el punto 1 no se puede entrenar ni validar un modelo. Una lectura por encima de 85 °C es una alerta del ejercicio, pero por sí sola no demuestra que una máquina vaya a fallar.
+El programa carga todos los registros del archivo `sensores_industriales.csv`, realiza los cálculos correspondientes y posteriormente genera el archivo `alertas.csv` con las lecturas que cumplen la condición establecida.
 
-### Prescriptiva
-**Riesgo previsto:** que los sensores con las lecturas máximas (S023, S019, S014 y S030, todos con 104.99 °C) y la Planta_3, que concentra más alertas, sigan mostrando temperaturas altas de forma repetida.
+El proceso actual puede representarse de la siguiente manera:
 
-**Acción propuesta:** programar una inspección técnica de los equipos asociados a esos cuatro sensores antes del siguiente turno de producción. Se priorizarían S023 y S030, porque pertenecen a Planta_3, que además es la planta con más alertas.
+```text
+Archivo CSV
+     |
+     v
+Carga de datos con Pandas
+     |
+     v
+Procesamiento de los registros
+     |
+     v
+Identificación de alertas
+     |
+     v
+Archivo alertas.csv
+```
 
-**Información que revisaríamos antes de decidir:**
-1. Si las lecturas altas son picos aislados o una tendencia sostenida, por ejemplo contando las alertas por sensor, porque una sola lectura máxima no indica un patrón.
-2. Si la vibración también aumenta en esos mismos momentos. Nuestro análisis no la incluyó.
-3. Si los sensores funcionan bien o están descalibrados, comparándolos con otros sensores de la misma planta.
-4. El historial de mantenimiento de las máquinas y la fecha de su última revisión.
-5. El costo de detener la producción frente al costo de una posible falla, y la disponibilidad de técnicos y refacciones.
+Este tipo de procesamiento es adecuado para el proyecto actual porque no es necesario responder inmediatamente cuando se genera cada medición. Los datos pueden analizarse después de haber sido almacenados.
+
+---
+
+## Alerta en pocos segundos
+
+Si la empresa necesitara generar una alerta pocos segundos después de que un sensor registre una temperatura superior a **85 °C**, sería necesario utilizar un procesamiento de tipo **Streaming**.
+
+En este caso, los sensores enviarían las mediciones continuamente y el sistema procesaría cada dato conforme fuera recibido.
+
+El proceso podría funcionar de la siguiente manera:
+
+```text
+Sensor
+   |
+   v
+Nueva medición
+   |
+   v
+Sistema de Streaming
+   |
+   v
+¿Temperatura > 85 °C?
+   |
+   +------ Sí ------> Generar alerta
+   |
+   +------ No ------> Continuar monitoreo
+```
+
+De esta manera, el sistema no tendría que esperar a que se complete un archivo para realizar el análisis. Cada nueva medición podría evaluarse inmediatamente.
+
+---
+
+## Resumen diario
+
+Para generar un resumen diario de las mediciones, sería adecuado utilizar nuevamente un procesamiento **Batch**.
+
+Al finalizar el día, el sistema podría tomar todas las mediciones almacenadas y calcular diferentes estadísticas, por ejemplo:
+
+* Temperatura promedio por planta.
+* Temperatura máxima registrada.
+* Cantidad de alertas.
+* Planta con mayor cantidad de alertas.
+* Cantidad de mediciones por sensor.
+* Promedio de vibración por planta.
+
+El proceso podría representarse de la siguiente manera:
+
+```text
+Datos almacenados durante el día
+              |
+              v
+       Procesamiento Batch
+              |
+              v
+     Cálculos y estadísticas
+              |
+              v
+         Resumen diario
+```
+
+El procesamiento Batch resulta apropiado porque el resumen no necesita generarse inmediatamente después de cada medición. Puede ejecutarse una vez al día utilizando todos los datos acumulados.
+
+---
+
+## Relación con el tiempo de respuesta
+
+La elección entre Batch y Streaming depende principalmente del tiempo de respuesta que requiere la situación.
+
+| Situación | Tipo de procesamiento | Justificación |
+| :--- | :--- | :--- |
+| **Analizar el archivo histórico de sensores** | Batch | Los datos ya están almacenados y no requieren una respuesta inmediata. |
+| **Generar un resumen diario** | Batch | El análisis puede realizarse periódicamente al finalizar el día. |
+| **Detectar una temperatura mayor a 85 °C en pocos segundos** | Streaming | La alerta requiere una respuesta rápida después de recibir la medición. |
+| **Analizar grandes cantidades de datos históricos** | Batch | Permite procesar un conjunto completo de información almacenada. |
+
+> **Conclusión:** Batch es adecuado cuando los datos pueden procesarse en grupos y no existe una necesidad inmediata de respuesta. En cambio, Streaming es más adecuado cuando las decisiones dependen de información que está llegando continuamente y se requiere una respuesta rápida.
