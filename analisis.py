@@ -4,12 +4,19 @@ import pandas as pd
 # Definición de rutas relativas obligatorias
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CSV_PATH = os.path.join(BASE_DIR, "data", "sensores_industriales.csv")
-OUTPUT_PATH = os.path.join(BASE_DIR, "data", "alertas.csv")
+
+# Carpeta y ruta de salida en 'resultados/'
+RESULTADOS_DIR = os.path.join(BASE_DIR, "resultados")
+OUTPUT_PATH = os.path.join(RESULTADOS_DIR, "alertas.csv")
 
 def ejecutar_analisis():
     if not os.path.exists(CSV_PATH):
         print(f"Error: No se encontró el archivo de datos en {CSV_PATH}")
         return
+
+    # Crear la carpeta resultados si no existe
+    if not os.path.exists(RESULTADOS_DIR):
+        os.makedirs(RESULTADOS_DIR)
 
     # Cargar el dataset
     df = pd.read_csv(CSV_PATH)
@@ -48,6 +55,10 @@ def ejecutar_analisis():
         plantas_top = alertas_por_planta[alertas_por_planta == max_alertas_count]
         for planta, count in plantas_top.items():
             print(f"   - {planta}: {count} alertas")
+
+    # 6. Exportar todas las lecturas con alerta a resultados/alertas.csv (2 ptos)
+    df_alertas.to_csv(OUTPUT_PATH, index=False)
+    print(f"\n6. Archivo de alertas exportado exitosamente a: {OUTPUT_PATH}\n")
 
 if __name__ == "__main__":
     ejecutar_analisis()
