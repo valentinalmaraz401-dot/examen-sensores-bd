@@ -173,9 +173,6 @@ Si la cantidad de datos aumenta considerablemente, pueden aparecer diferentes li
 * **Infraestructura:** Dificultades para procesar los datos en una sola computadora.
 * **Escalabilidad:** Necesidad de procesamiento distribuido.
 * **Ingesta:** Necesidad de sistemas capaces de recibir datos en tiempo real.
-* **Consultas:** Mayor complejidad para almacenar y consultar grandes cantidades de información.
-* **Gobernanza:** Necesidad de mecanismos para controlar la calidad y confiabilidad de los datos.
-
 # 7. Batch y Streaming
 
 ## Procesamiento actual
@@ -186,7 +183,7 @@ El programa carga todos los registros del archivo `sensores_industriales.csv`, r
 
 El proceso actual puede representarse de la siguiente manera:
 
-```text
+```
 Archivo CSV
      |
      v
@@ -204,8 +201,6 @@ Archivo alertas.csv
 
 Este tipo de procesamiento es adecuado para el proyecto actual porque no es necesario responder inmediatamente cuando se genera cada medición. Los datos pueden analizarse después de haber sido almacenados.
 
----
-
 ## Alerta en pocos segundos
 
 Si la empresa necesitara generar una alerta pocos segundos después de que un sensor registre una temperatura superior a **85 °C**, sería necesario utilizar un procesamiento de tipo **Streaming**.
@@ -214,7 +209,7 @@ En este caso, los sensores enviarían las mediciones continuamente y el sistema 
 
 El proceso podría funcionar de la siguiente manera:
 
-```text
+```
 Sensor
    |
    v
@@ -233,8 +228,6 @@ Sistema de Streaming
 
 De esta manera, el sistema no tendría que esperar a que se complete un archivo para realizar el análisis. Cada nueva medición podría evaluarse inmediatamente.
 
----
-
 ## Resumen diario
 
 Para generar un resumen diario de las mediciones, sería adecuado utilizar nuevamente un procesamiento **Batch**.
@@ -250,7 +243,7 @@ Al finalizar el día, el sistema podría tomar todas las mediciones almacenadas 
 
 El proceso podría representarse de la siguiente manera:
 
-```text
+```
 Datos almacenados durante el día
               |
               v
@@ -265,17 +258,190 @@ Datos almacenados durante el día
 
 El procesamiento Batch resulta apropiado porque el resumen no necesita generarse inmediatamente después de cada medición. Puede ejecutarse una vez al día utilizando todos los datos acumulados.
 
----
-
 ## Relación con el tiempo de respuesta
 
 La elección entre Batch y Streaming depende principalmente del tiempo de respuesta que requiere la situación.
 
-| Situación | Tipo de procesamiento | Justificación |
-| :--- | :--- | :--- |
-| **Analizar el archivo histórico de sensores** | Batch | Los datos ya están almacenados y no requieren una respuesta inmediata. |
-| **Generar un resumen diario** | Batch | El análisis puede realizarse periódicamente al finalizar el día. |
-| **Detectar una temperatura mayor a 85 °C en pocos segundos** | Streaming | La alerta requiere una respuesta rápida después de recibir la medición. |
-| **Analizar grandes cantidades de datos históricos** | Batch | Permite procesar un conjunto completo de información almacenada. |
+| Situación | Tipo de procesamiento | Justificación | 
+| ----- | ----- | ----- | 
+| **Analizar el archivo histórico de sensores** | Batch | Los datos ya están almacenados y no requieren una respuesta inmediata. | 
+| **Generar un resumen diario** | Batch | El análisis puede realizarse periódicamente al finalizar el día. | 
+| **Detectar una temperatura mayor a 85 °C en pocos segundos** | Streaming | La alerta requiere una respuesta rápida después de recibir la medición. | 
+| **Analizar grandes cantidades de datos históricos** | Batch | Permite procesar un conjunto completo de información almacenada. | 
 
 > **Conclusión:** Batch es adecuado cuando los datos pueden procesarse en grupos y no existe una necesidad inmediata de respuesta. En cambio, Streaming es más adecuado cuando las decisiones dependen de información que está llegando continuamente y se requiere una respuesta rápida.
+
+---
+
+# 8. Lambda y Kappa
+
+## Escenario A → Arquitectura Lambda
+
+### Justificación
+
+En el escenario A, la empresa desea contar con una ruta que permita recalcular información histórica mediante procesamiento **Batch** y, al mismo tiempo, otra ruta que permita procesar rápidamente las mediciones recientes.
+
+Para este escenario se recomienda utilizar una **Arquitectura Lambda**, debido a que combina dos formas de procesamiento: Batch y Streaming.
+
+* **Capa Batch:** Permite analizar grandes cantidades de datos históricos y recalcular resultados cuando sea necesario.
+* **Capa Streaming:** Permite procesar los datos recientes con una menor latencia.
+
+De esta manera, la empresa puede mantener información histórica detallada y, al mismo tiempo, obtener resultados actualizados de las mediciones que están llegando.
+
+### Diagrama
+
+```
+                       Datos de sensores
+                              |
+                              v
+                       Almacenamiento
+                              |
+                +-------------+-------------+
+                |                           |
+                v                           v
+       Procesamiento Batch        Procesamiento Streaming
+                |                           |
+                v                           v
+       Datos históricos             Datos recientes
+                |                           |
+                +-------------+-------------+
+                              |
+                              v
+                       Resultado final
+```
+
+> **Conclusión:** La Arquitectura Lambda es adecuada para este escenario porque permite combinar el análisis histórico con el procesamiento de datos recientes. Esto resulta útil cuando la empresa necesita tanto precisión sobre información histórica como rapidez para las mediciones actuales.
+
+## Escenario B → Arquitectura Kappa
+
+### Justificación
+
+En el escenario B, la empresa desea utilizar una sola lógica para procesar los eventos y conservar las mediciones para poder reproducirlas o procesarlas nuevamente cuando sea necesario.
+
+Para este escenario se recomienda utilizar una **Arquitectura Kappa**.
+
+* **Flujo de eventos:** Kappa se basa principalmente en un flujo de eventos donde las mediciones son almacenadas como eventos y posteriormente procesadas mediante una única lógica de Streaming.
+* **Reprocesamiento:** Si fuera necesario realizar nuevamente un análisis, los eventos almacenados pueden reproducirse para volver a procesarlos.
+
+Una ventaja clave de este enfoque es que **evita mantener dos caminos de procesamiento independientes**, como ocurre en la Arquitectura Lambda.
+
+### Diagrama
+
+```
+                         Sensores
+                            |
+                            v
+                    Flujo de eventos
+                            |
+                            v
+                 Almacenamiento de eventos
+                            |
+                            v
+                  Procesamiento Streaming
+                            |
+                            v
+                       Resultados
+                            |
+                            v
+                 Reprocesamiento cuando
+                      sea necesario
+```
+
+> **Conclusión:** La Arquitectura Kappa es adecuada para este escenario porque permite utilizar una sola lógica de procesamiento y conservar los eventos para reproducirlos posteriormente. Esto facilita la actualización o modificación del procesamiento sin perder las mediciones históricas.
+
+---
+
+# 9. Analítica descriptiva, predictiva y prescriptiva
+
+## Analítica descriptiva
+
+La analítica descriptiva permite conocer y explicar **qué ocurrió** con los datos analizados. A partir del análisis realizado en el proyecto se obtuvieron diferentes resultados:
+
+* **Hallazgo 1:** El conjunto de datos contiene **100,000 registros y 40 sensores únicos**. Esto permite conocer la cantidad de mediciones disponibles y la cantidad de sensores representados en el conjunto de datos.
+* **Hallazgo 2:** Se identificaron **6,954 lecturas** con una temperatura superior a **85 °C**. Además, `Planta_3` presentó la mayor cantidad de alertas, con **1,777 lecturas**.
+
+> **Nota:** Este resultado permite identificar que `Planta_3` concentra la mayor cantidad de lecturas consideradas como alerta dentro del análisis realizado. Es importante aclarar que una lectura superior a 85 °C representa una alerta definida para este ejercicio y, por sí sola, no demuestra que exista una falla real en una máquina.
+
+## Analítica predictiva
+
+La analítica predictiva utiliza los datos históricos y actuales para intentar estimar **qué podría ocurrir en el futuro**.
+
+### Pregunta de enfoque
+Una pregunta predictiva que podría plantearse para este proyecto sería:  
+> *¿Qué probabilidad existe de que una máquina presente una condición de riesgo o una posible falla durante las próximas horas o días?*
+
+Esta pregunta permitiría utilizar los datos históricos de los sensores para identificar patrones relacionados con condiciones anormales de las máquinas. Sin embargo, para desarrollar un modelo predictivo sería necesario contar con más información que la disponible actualmente.
+
+### Datos adicionales necesarios
+Para realizar una predicción precisa sería conveniente contar con:
+
+* Historial de temperaturas de cada sensor.
+* Historial de vibraciones.
+* Fecha y hora de las mediciones.
+* Historial de fallas de las máquinas.
+* Historial de mantenimientos.
+* Antigüedad de cada máquina.
+* Tipo y modelo de máquina.
+* Horas de funcionamiento.
+* Condiciones de operación.
+* Cambios o reparaciones realizadas anteriormente.
+
+Con estos datos sería posible buscar patrones que permitan identificar situaciones que podrían estar relacionadas con una futura condición anormal o una posible falla.
+
+## Analítica prescriptiva
+
+La analítica prescriptiva busca determinar o recomendar **qué acción podría realizarse** después de identificar una situación de riesgo.
+
+### Acción recomendada
+Si un modelo predictivo indicara que una máquina presenta un riesgo elevado de desarrollar una condición anormal, una posible acción sería **programar una inspección o mantenimiento preventivo** antes de que ocurra una falla.
+
+El proceso podría representarse de la siguiente manera:
+
+```
+Datos de sensores
+       |
+       v
+Modelo predictivo
+       |
+       v
+Identificación de riesgo
+       |
+       v
+Revisión de información
+       |
+       v
+Evaluación del personal
+       |
+       v
+Inspección o mantenimiento
+```
+
+La acción no debería tomarse únicamente con base en una lectura aislada de temperatura. Es necesario considerar diferentes variables y antecedentes de la máquina antes de tomar una decisión.
+
+### Información a revisar antes de actuar
+Antes de decidir realizar un mantenimiento o inspección sería necesario revisar:
+
+1. Historial de temperatura.
+2. Historial de vibración.
+3. Cantidad y frecuencia de alertas.
+4. Historial de fallas.
+5. Historial de mantenimiento.
+6. Antigüedad de la máquina.
+7. Horas de funcionamiento.
+8. Condiciones actuales de operación.
+9. Recomendaciones del fabricante.
+10. Evaluación del personal de mantenimiento.
+
+Con esta información, la empresa podría determinar si el riesgo justifica una inspección inmediata, un mantenimiento programado o simplemente continuar con el monitoreo.
+
+---
+
+## Conclusión General
+
+* La **analítica descriptiva** permite conocer qué ocurrió.
+* La **analítica predictiva** busca estimar qué podría ocurrir.
+* La **analítica prescriptiva** busca determinar qué acción podría realizarse ante una situación identificada.
+
+> Los resultados obtenidos en este proyecto sirven como indicadores para el ejercicio académico. Una lectura superior a 85 °C es una alerta definida para el análisis y no significa por sí misma que exista una falla real en la máquina, especialmente porque los datos utilizados son simulados.* **Consultas:** Mayor complejidad para almacenar y consultar grandes cantidades de información.
+* **Gobernanza:** Necesidad de mecanismos para controlar la calidad y confiabilidad de los datos.
+
